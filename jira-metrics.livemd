@@ -1,0 +1,87 @@
+# Jira Metrics
+
+```elixir
+Mix.install([
+  {:req, "~> 0.3.0"},
+  {:kino, "~> 0.6.2"},
+  {:timex, "~> 3.7"}
+])
+```
+
+## Authenticate
+
+Jira uses basic authentication for requests over the REST API. Therefore it requires an user 
+and an API key. The user is the same one used to login in Jira, so your e-mail. The API key
+must be generated individually.
+
+Please check the 
+[Jira documentation](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/) 
+to understand how to create your API key.
+
+```elixir
+jira_url = Kino.Input.text("Jira URL: ")
+```
+
+```elixir
+user_input = Kino.Input.text("User name: ")
+```
+
+```elixir
+api_key_input = Kino.Input.password("API key: ")
+```
+
+```elixir
+user = Kino.Input.read(user_input)
+api_key = Kino.Input.read(api_key_input)
+auth = {user, api_key}
+jira_req = Req.new(base_url: Kino.Input.read(jira_url), auth: auth)
+
+auth_req = Req.get!(jira_req, url: "/rest/api/3/serverInfo")
+
+case auth_req.status do
+  200 ->
+    IO.puts("Successfully authenticated")
+
+  _status ->
+    IO.inspect(jira_req)
+    IO.inspect(auth_req)
+    IO.puts("Authentication failed with status #{auth_req.status}")
+end
+```
+
+## Setup project
+
+```elixir
+board_id_input = Kino.Input.text("Board ID: ")
+```
+
+```elixir
+board_id = Kino.Input.read(board_id_input)
+board = Req.get!(jira_req, url: "/rest/agile/1.0/board/#{board_id}")
+
+IO.puts("Getting issues for #{board.body["name"]}")
+
+map_issue_fn = fn issue ->
+  %{
+    key: issue["key"],
+    type: issue["fields"]["issuetype"]["name"],
+    created: Timex.parse!(issue["fields"]["created"], "{ISO:Extended}"),
+    columns: []
+  }
+end
+
+issues =
+  Req.get!(jira_req, url: "/rest/agile/1.0/board/#{board_id}/issue")
+  |> then(& &1.body["issues"])
+  |> Stream.map(& &1["key"])
+  |> Stream.chunk_every(100)
+  |> Stream.map(&Enum.join(&1, ","))
+  |> Stream.map(
+    &Req.get!(jira_req,
+      url: "rest/api/2/search?jql=key%20in%20(#{&1})&expand=changelog&fields=issuetype,created"
+    )
+  )
+  |> Stream.flat_map(& &1.body["issues"])
+  |> Stream.map(&map_issue_fn.(&1))
+  |> Enum.to_list()
+```
