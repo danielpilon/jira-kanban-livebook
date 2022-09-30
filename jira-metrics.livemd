@@ -57,16 +57,43 @@ board_id_input = Kino.Input.text("Board ID: ")
 
 ```elixir
 board_id = Kino.Input.read(board_id_input)
-board = Req.get!(jira_req, url: "/rest/agile/1.0/board/#{board_id}")
 
-IO.puts("Getting issues for #{board.body["name"]}")
+board =
+  Req.get!(jira_req, url: "rest/greenhopper/1.0/xboard/work/allData.json?rapidViewId=#{board_id}")
+  |> then(& &1.body["columnsData"]["columns"])
+
+IO.puts("Getting issues...")
+
+board_columns =
+  board
+  |> Enum.map(&{&1["name"], &1["statusIds"]})
+  |> Enum.flat_map(&Enum.map(elem(&1, 1), fn status_ids -> {status_ids, elem(&1, 0)} end))
+  |> Enum.into(%{})
+
+map_column_fn = fn issue ->
+  for history <- issue["changelog"]["histories"],
+      item <- history["items"],
+      item["field"] == "status",
+      from_id = item["from"],
+      to_id = item["to"],
+      from_column =
+        if(Map.has_key?(board_columns, from_id), do: board_columns[from_id], else: nil),
+      to_column = if(Map.has_key?(board_columns, to_id), do: board_columns[to_id], else: nil),
+      from_column != to_column do
+    %{
+      from: from_column,
+      to: to_column,
+      timestamp: Timex.parse!(history["created"], "{ISO:Extended}")
+    }
+  end
+end
 
 map_issue_fn = fn issue ->
   %{
     key: issue["key"],
     type: issue["fields"]["issuetype"]["name"],
     created: Timex.parse!(issue["fields"]["created"], "{ISO:Extended}"),
-    columns: []
+    columns: map_column_fn.(issue)
   }
 end
 
@@ -81,6 +108,7 @@ issues =
       url: "rest/api/2/search?jql=key%20in%20(#{&1})&expand=changelog&fields=issuetype,created"
     )
   )
+  |> Stream.take(2)
   |> Stream.flat_map(& &1.body["issues"])
   |> Stream.map(&map_issue_fn.(&1))
   |> Enum.to_list()
