@@ -108,7 +108,6 @@ issues =
       url: "rest/api/2/search?jql=key%20in%20(#{&1})&expand=changelog&fields=issuetype,created"
     )
   )
-  |> Stream.take(2)
   |> Stream.flat_map(& &1.body["issues"])
   |> Stream.map(&map_issue_fn.(&1))
   |> Enum.to_list()
