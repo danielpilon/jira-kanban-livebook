@@ -67,23 +67,71 @@ IO.puts("Getting issues...")
 board_columns =
   board
   |> Enum.map(&{&1["name"], &1["statusIds"]})
+  |> Enum.into(%{})
+
+status_to_column =
+  board_columns
   |> Enum.flat_map(&Enum.map(elem(&1, 1), fn status_ids -> {status_ids, elem(&1, 0)} end))
   |> Enum.into(%{})
 
 map_column_fn = fn issue ->
-  for history <- issue["changelog"]["histories"],
-      item <- history["items"],
-      item["field"] == "status",
-      from_id = item["from"],
-      to_id = item["to"],
-      from_column =
-        if(Map.has_key?(board_columns, from_id), do: board_columns[from_id], else: nil),
-      to_column = if(Map.has_key?(board_columns, to_id), do: board_columns[to_id], else: nil),
-      from_column != to_column do
+  transitions =
+    for history <- issue["changelog"]["histories"],
+        item <- history["items"],
+        item["field"] == "status",
+        from_id = item["from"],
+        to_id = item["to"],
+        from_column =
+          if(Map.has_key?(status_to_column, from_id), do: status_to_column[from_id], else: nil),
+        to_column =
+          if(Map.has_key?(status_to_column, to_id), do: status_to_column[to_id], else: nil),
+        from_column != to_column do
+      %{
+        from: from_column,
+        to: to_column,
+        timestamp: Timex.parse!(history["created"], "{ISO:Extended}")
+      }
+    end
+
+  for name <- Map.keys(board_columns),
+      all_entered =
+        transitions
+        |> Enum.filter(&(&1.to == name))
+        |> Enum.sort_by(& &1.timestamp)
+        |> Enum.map(& &1.timestamp),
+      all_exited =
+        transitions
+        |> Enum.filter(&(&1.from == name))
+        |> Enum.sort_by(& &1.timestamp)
+        |> Enum.map(& &1.timestamp),
+      entered =
+        transitions
+        |> Enum.filter(&(&1.to == name))
+        |> Enum.sort_by(& &1.timestamp, :desc)
+        |> Enum.map(& &1.timestamp)
+        |> List.first(),
+      exited =
+        transitions
+        |> Enum.filter(&(&1.from == name))
+        |> Enum.sort_by(& &1.timestamp, :desc)
+        |> Enum.map(& &1.timestamp)
+        |> List.first() do
+    transitions =
+      all_entered
+      |> Enum.map(
+        &%{
+          entered: &1,
+          exited:
+            all_exited
+            |> Enum.filter(fn date -> date >= &1 end)
+        }
+      )
+
     %{
-      from: from_column,
-      to: to_column,
-      timestamp: Timex.parse!(history["created"], "{ISO:Extended}")
+      name: name,
+      entered: entered,
+      exited: exited,
+      transitions: transitions
     }
   end
 end
