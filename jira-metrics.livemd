@@ -2,7 +2,7 @@
 
 ```elixir
 Mix.install([
-  {:req, "~> 0.3.0"},
+  {:req, "~> 0.3.1"},
   {:kino, "~> 0.6.2"},
   {:timex, "~> 3.7"}
 ])
@@ -139,18 +139,50 @@ map_issue_fn = fn issue ->
   }
 end
 
+extract_next_url_from_response = fn response ->
+  current = response.body["startAt"] + 1
+  total = response.body["total"]
+  next = current + 50 - 1
+  left = total - next
+
+  cond do
+    left < 1 -> nil
+    true -> "/rest/agile/1.0/board/#{board_id}/issue?startAt=#{next}"
+  end
+end
+
+initial_url = "/rest/agile/1.0/board/#{board_id}/issue?startAt=0"
+
 issues =
-  Req.get!(jira_req, url: "/rest/agile/1.0/board/#{board_id}/issue")
-  |> then(& &1.body["issues"])
-  |> Stream.map(& &1["key"])
+  Stream.unfold(initial_url, fn
+    nil ->
+      nil
+
+    url ->
+      case Req.get(jira_req, url: url) do
+        {:ok, response} ->
+          next_url = extract_next_url_from_response.(response)
+          issues_from_page = response.body["issues"]
+
+          {issues_from_page, next_url}
+
+        {:error, response} ->
+          IO.puts(inspect(response))
+          {[], nil}
+      end
+  end)
+  |> Stream.flat_map(&Enum.map(&1, fn issue -> issue["key"] end))
   |> Stream.chunk_every(100)
   |> Stream.map(&Enum.join(&1, ","))
   |> Stream.map(
     &Req.get!(jira_req,
-      url: "rest/api/2/search?jql=key%20in%20(#{&1})&expand=changelog&fields=issuetype,created"
+      url:
+        "rest/api/2/search?jql=key%20in%20(#{&1})&expand=changelog&fields=issuetype,created&maxResults=100"
     )
   )
   |> Stream.flat_map(& &1.body["issues"])
   |> Stream.map(&map_issue_fn.(&1))
   |> Enum.to_list()
+
+"Fetched #{Enum.count(issues)} issues."
 ```
