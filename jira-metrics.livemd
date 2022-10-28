@@ -18,23 +18,17 @@ Please check the
 [Jira documentation](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/) 
 to understand how to create your API key.
 
-```elixir
-jira_url = Kino.Input.text("Jira URL: ")
-```
+To setup your credentials, please create new Livebook Secrets with the following patterns:
+
+* **JIRA_API_KEY**
+* **JIRA_URL**
+* **JIRA_USER**
 
 ```elixir
-user_input = Kino.Input.text("User name: ")
-```
-
-```elixir
-api_key_input = Kino.Input.password("API key: ")
-```
-
-```elixir
-user = Kino.Input.read(user_input)
-api_key = Kino.Input.read(api_key_input)
+user = System.fetch_env!("LB_JIRA_USER")
+api_key = System.fetch_env!("LB_JIRA_API_KEY")
 auth = {user, api_key}
-jira_req = Req.new(base_url: Kino.Input.read(jira_url), auth: auth)
+jira_req = Req.new(base_url: System.fetch_env!("LB_JIRA_URL"), auth: auth)
 
 auth_req = Req.get!(jira_req, url: "/rest/api/3/serverInfo")
 
